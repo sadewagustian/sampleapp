@@ -82,7 +82,7 @@ func main() {
 	router.HandleFunc("/hello", hello)
 	router.HandleFunc("/s3", awss3)
 	http.ListenAndServe(":8080", router)
-	fmt.Println("Example finished updating, please visit :2222")
+	//fmt.Println("Example finished updating, please visit :2222")
 	select {}
 }
 
