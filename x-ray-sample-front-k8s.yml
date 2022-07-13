@@ -46,5 +46,6 @@ spec:
               value: aws-collector.aws-otel:4317
           ports:
             - containerPort: 8080
+      nodeName: ip-10-19-40-182.ap-southeast-1.compute.internal
       serviceAccountName: ekstos3
 
