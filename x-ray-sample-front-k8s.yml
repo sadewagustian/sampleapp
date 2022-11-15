@@ -36,16 +36,17 @@ spec:
     spec:
       containers:
         - name: x-ray-sample-front-k8s
-          image: 040256855012.dkr.ecr.ap-southeast-1.amazonaws.com/test-app:v1.4
-          securityContext:
-            privileged: false
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
+          image: 040256855012.dkr.ecr.ap-southeast-1.amazonaws.com/test-app:v2.7
           env:
             - name: EXPORTER_ENDPOINT
-              value: aws-collector.aws-otel:4317
+              value: k8s-awsotel-awscolle-2fd3f6199e-bc06b25629423072.elb.ap-southeast-1.amazonaws.com:4317
           ports:
             - containerPort: 8080
-      nodeName: ip-10-19-40-182.ap-southeast-1.compute.internal
+          resources:
+           limits:
+            memory: 256Mi
+           requests:
+            cpu: 64m
+            memory: 256Mi 
       serviceAccountName: ekstos3
 

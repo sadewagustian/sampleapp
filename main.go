@@ -2,31 +2,22 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
-	"github.com/XSAM/otelsql"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 	"go.opentelemetry.io/contrib/propagators/aws/xray"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/metric/global"
 	"go.opentelemetry.io/otel/propagation"
-	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
-	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
-	"go.opentelemetry.io/otel/sdk/metric/selector/simple"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -34,9 +25,8 @@ import (
 )
 
 const (
-	serviceName         = "hello-go-app"
-	serviceVersion      = "v1.0.0"
-	instrumentationName = "otelsql-example"
+	serviceName    = "hello-go-app"
+	serviceVersion = "v1.0.1"
 )
 
 var (
@@ -45,36 +35,12 @@ var (
 		propagation.TraceContext{},
 		propagation.Baggage{},
 		xray.Propagator{})
-	mysqlDSN = "user:pwsd@tcp(test-db-1.c3eveddczuf9.ap-southeast-1.rds.amazonaws.com)/mysql?parseTime=true"
-	endpoint = os.Getenv("EXPORTER_ENDPOINT")
 )
 
 func main() {
 
 	// Initialize the tracer provider
 	initTracer()
-	initMeter()
-
-	// Connect to database
-	db, err := otelsql.Open("mysql", mysqlDSN, otelsql.WithAttributes(
-		semconv.DBSystemMySQL,
-	))
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	err = otelsql.RegisterDBStatsMetrics(db, otelsql.WithAttributes(
-		semconv.DBSystemMySQL,
-	))
-	if err != nil {
-		panic(err)
-	}
-
-	err = query(db)
-	if err != nil {
-		panic(err)
-	}
 
 	// Start the microservice
 	router := mux.NewRouter()
@@ -82,8 +48,7 @@ func main() {
 	router.HandleFunc("/hello", hello)
 	router.HandleFunc("/s3", awss3)
 	http.ListenAndServe(":8080", router)
-	//fmt.Println("Example finished updating, please visit :2222")
-	select {}
+
 }
 
 func hello(writer http.ResponseWriter, request *http.Request) {
@@ -100,11 +65,15 @@ func hello(writer http.ResponseWriter, request *http.Request) {
 	span.End()
 
 	// Serialize the context into carrier
-	carrier := propagation.MapCarrier{}
+	carrier := propagation.HeaderCarrier{}
 	propgator.Inject(ctx, carrier)
-	// This carrier is sent accros the process
-	fmt.Println("", request.Header)
-	//fmt.Printf("%v \n", carrier)
+	// Print Header with JSON format
+	jsonStr, err := json.Marshal(carrier)
+	if err != nil {
+		fmt.Printf("Error: %s", err.Error())
+	} else {
+		fmt.Println(string(jsonStr))
+	}
 
 	// Extract the context and create a custom span
 	parentCtx := propgator.Extract(ctx, carrier)
@@ -185,7 +154,7 @@ func s3response(writer http.ResponseWriter) response {
 }
 
 type response struct {
-	Message string `json:"Message"`
+	Message string
 }
 
 func (r response) isValid() bool {
@@ -194,6 +163,7 @@ func (r response) isValid() bool {
 
 func initTracer() {
 	ctx := context.Background()
+	endpoint := os.Getenv("EXPORTER_ENDPOINT")
 	// Resource to name traces/metrics
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
@@ -241,59 +211,4 @@ func initTracer() {
 	// This carrier is sent accros the process
 	//	fmt.Println(carrier)
 
-}
-func initMeter() {
-	ctx := context.Background()
-	metricOpts := []otlpmetricgrpc.Option{
-		otlpmetricgrpc.WithTimeout(5 * time.Second),
-	}
-
-	metricExporter, err := otlpmetricgrpc.New(ctx, metricOpts...)
-	if err != nil {
-		log.Fatalf("%s: %v", "failed to create exporter", err)
-	}
-
-	pusher := controller.New(
-		processor.NewFactory(
-			simple.NewWithHistogramDistribution(),
-			metricExporter,
-		),
-		controller.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(serviceName),
-		)),
-		controller.WithExporter(metricExporter),
-		controller.WithCollectPeriod(5*time.Second),
-	)
-
-	err = pusher.Start(ctx)
-	if err != nil {
-		log.Fatalf("%s: %v", "failed to start the pusher", err)
-	}
-
-	global.SetMeterProvider(pusher)
-}
-
-func query(db *sql.DB) error {
-	// Create a span
-	tracer := otel.GetTracerProvider()
-	ctx, span := tracer.Tracer(instrumentationName).Start(context.Background(), "example")
-	defer span.End()
-
-	// Make a query
-	rows, err := db.QueryContext(ctx, `SELECT CURRENT_TIMESTAMP`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var currentTime time.Time
-	for rows.Next() {
-		err = rows.Scan(&currentTime)
-		if err != nil {
-			return err
-		}
-	}
-	fmt.Printf("sql query: %v \n", currentTime)
-	return nil
 }

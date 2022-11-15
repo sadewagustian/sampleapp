@@ -4,7 +4,7 @@ FROM golang:1.17-alpine as builder
 
 RUN mkdir -p /app
 WORKDIR /app
-
+RUN apk add -U --no-cache ca-certificates
 COPY go.mod go.sum ./
 
 
@@ -15,8 +15,9 @@ ENV GO111MODULE on
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o ./sample-front .
 
-FROM alpine
+FROM scratch
 
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 COPY --from=builder /app/sample-front /main
 COPY --from=builder /etc/passwd /etc/passwd
